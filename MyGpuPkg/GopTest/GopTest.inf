@@ -1,0 +1,21 @@
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = GopTest
+  FILE_GUID                      = 9B7D0AAE-54E9-4C61-9D5C-7E5C7D9A1001
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = UefiMain
+
+[Sources]
+  GopTest.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[Protocols]
+  gEfiGraphicsOutputProtocolGuid
+
+[LibraryClasses]
+  UefiApplicationEntryPoint
+  UefiLib
+  UefiBootServicesTableLib

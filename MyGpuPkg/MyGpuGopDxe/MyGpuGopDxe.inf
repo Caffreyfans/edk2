@@ -1,17 +1,21 @@
 [Defines]
-    INF_VERSION                    = 0x00010005
-    BASE_NAME                       = mygpugopdex
+    INF_VERSION                     = 0x00010005
+    BASE_NAME                       = MyGpuGopDxe
     FILE_GUID                       = 12345678-1234-1234-1234-123456789abc
     MODULE_TYPE                     = UEFI_DRIVER
-    VERSION_STRING                   = 1.0
-    ENTRY_POINT                      = MyGpuGopDexEntryPoint
+    VERSION_STRING                  = 1.0
+    ENTRY_POINT                     = MyGpuGopDxeEntryPoint
 
 [Sources]
-    MyGpuGopDex.c
+    gop.c
+    components.c
+    driver.h
+    ComponentName.c
 
 [Packages]
     MdePkg/MdePkg.dec
     MdeModulePkg/MdeModulePkg.dec
+    MyGpuPkg/MyGpuPkg.dec
 
 [LibraryClasses]
     UefiDriverEntryPoint
@@ -24,4 +28,4 @@
 [Protocols]
     gEfiGraphicsOutputProtocolGuid
     gEfiPciIoProtocolGuid
-    
+    gEfiDriverBindingProtocolGuid

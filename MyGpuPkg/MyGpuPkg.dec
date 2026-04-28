@@ -1,0 +1,5 @@
+[Defines]
+  DEC_SPECIFICATION              = 0x00010005
+  PACKAGE_NAME                   = MyGpuPkg
+  PACKAGE_GUID                   = e89b1b53-de22-413d-af80-bcafd56af151
+  PACKAGE_VERSION                = 0.1
