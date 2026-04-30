@@ -1,5 +1,5 @@
 /** @file
-  Component name for the QEMU video controller.
+  Component name for the Metax video controller.
 
   Copyright (c) 2006 - 2010, Intel Corporation. All rights reserved.<BR>
 
@@ -7,35 +7,31 @@
 
 **/
 
-#include "driver.h"
+#include "MetaXGpu.h"
 
 //
 // EFI Component Name Protocol
 //
-GLOBAL_REMOVE_IF_UNREFERENCED EFI_COMPONENT_NAME_PROTOCOL  gQemuVideoComponentName = {
-  QemuVideoComponentNameGetDriverName,
-  QemuVideoComponentNameGetControllerName,
-  "eng"
-};
+GLOBAL_REMOVE_IF_UNREFERENCED EFI_COMPONENT_NAME_PROTOCOL gMetaXVideoComponentName = {
+    MetaXVideoComponentNameGetDriverName,
+    MetaXVideoComponentNameGetControllerName,
+    "eng"};
 
 //
 // EFI Component Name 2 Protocol
 //
-GLOBAL_REMOVE_IF_UNREFERENCED EFI_COMPONENT_NAME2_PROTOCOL  gQemuVideoComponentName2 = {
-  (EFI_COMPONENT_NAME2_GET_DRIVER_NAME)QemuVideoComponentNameGetDriverName,
-  (EFI_COMPONENT_NAME2_GET_CONTROLLER_NAME)QemuVideoComponentNameGetControllerName,
-  "en"
-};
+GLOBAL_REMOVE_IF_UNREFERENCED EFI_COMPONENT_NAME2_PROTOCOL gMetaXVideoComponentName2 = {
+    (EFI_COMPONENT_NAME2_GET_DRIVER_NAME)MetaXVideoComponentNameGetDriverName,
+    (EFI_COMPONENT_NAME2_GET_CONTROLLER_NAME)MetaXVideoComponentNameGetControllerName,
+    "en"};
 
-GLOBAL_REMOVE_IF_UNREFERENCED EFI_UNICODE_STRING_TABLE  mQemuVideoDriverNameTable[] = {
-  { "eng;en", L"My Video Driver" },
-  { NULL,     NULL                 }
-};
+GLOBAL_REMOVE_IF_UNREFERENCED EFI_UNICODE_STRING_TABLE mMetaXVideoDriverNameTable[] = {
+    {"eng;en", L"MetaX Video Driver"},
+    {NULL, NULL}};
 
-GLOBAL_REMOVE_IF_UNREFERENCED EFI_UNICODE_STRING_TABLE  mQemuVideoControllerNameTable[] = {
-  { "eng;en", L"My Video PCI Adapter" },
-  { NULL,     NULL                      }
-};
+GLOBAL_REMOVE_IF_UNREFERENCED EFI_UNICODE_STRING_TABLE mQemuVideoControllerNameTable[] = {
+    {"eng;en", L"MetaX Video PCI Adapter"},
+    {NULL, NULL}};
 
 /**
   Retrieves a Unicode string that is the user readable name of the driver.
@@ -78,19 +74,17 @@ GLOBAL_REMOVE_IF_UNREFERENCED EFI_UNICODE_STRING_TABLE  mQemuVideoControllerName
 **/
 EFI_STATUS
 EFIAPI
-QemuVideoComponentNameGetDriverName (
-  IN  EFI_COMPONENT_NAME_PROTOCOL  *This,
-  IN  CHAR8                        *Language,
-  OUT CHAR16                       **DriverName
-  )
+MetaXVideoComponentNameGetDriverName(
+    IN EFI_COMPONENT_NAME_PROTOCOL *This,
+    IN CHAR8 *Language,
+    OUT CHAR16 **DriverName)
 {
-  return LookupUnicodeString2 (
-           Language,
-           This->SupportedLanguages,
-           mQemuVideoDriverNameTable,
-           DriverName,
-           (BOOLEAN)(This == &gQemuVideoComponentName)
-           );
+  return LookupUnicodeString2(
+      Language,
+      This->SupportedLanguages,
+      mMetaXVideoDriverNameTable,
+      DriverName,
+      (BOOLEAN)(This == &gMetaXVideoComponentName));
 }
 
 /**
@@ -163,20 +157,20 @@ QemuVideoComponentNameGetDriverName (
 **/
 EFI_STATUS
 EFIAPI
-QemuVideoComponentNameGetControllerName (
-  IN  EFI_COMPONENT_NAME_PROTOCOL  *This,
-  IN  EFI_HANDLE                   ControllerHandle,
-  IN  EFI_HANDLE                   ChildHandle        OPTIONAL,
-  IN  CHAR8                        *Language,
-  OUT CHAR16                       **ControllerName
-  )
+MetaXVideoComponentNameGetControllerName(
+    IN EFI_COMPONENT_NAME_PROTOCOL *This,
+    IN EFI_HANDLE ControllerHandle,
+    IN EFI_HANDLE ChildHandle OPTIONAL,
+    IN CHAR8 *Language,
+    OUT CHAR16 **ControllerName)
 {
   // EFI_STATUS  Status;
 
   //
   // This is a device driver, so ChildHandle must be NULL.
   //
-  if (ChildHandle != NULL) {
+  if (ChildHandle != NULL)
+  {
     return EFI_UNSUPPORTED;
   }
 
@@ -195,11 +189,10 @@ QemuVideoComponentNameGetControllerName (
   //
   // Get the QEMU Video's Device structure
   //
-  return LookupUnicodeString2 (
-           Language,
-           This->SupportedLanguages,
-           mQemuVideoControllerNameTable,
-           ControllerName,
-           (BOOLEAN)(This == &gQemuVideoComponentName)
-           );
+  return LookupUnicodeString2(
+      Language,
+      This->SupportedLanguages,
+      mQemuVideoControllerNameTable,
+      ControllerName,
+      (BOOLEAN)(This == &gMetaXVideoComponentName));
 }

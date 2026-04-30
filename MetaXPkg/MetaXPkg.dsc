@@ -1,9 +1,9 @@
 [Defines]
-PLATFORM_NAME = MyGpuPkg
+PLATFORM_NAME = MetaXPkg
 PLATFORM_GUID = 9A4B8D52-2222-4C33-8888-123456789002
 PLATFORM_VERSION = 0.1
 DSC_SPECIFICATION = 0x00010005
-OUTPUT_DIRECTORY = Build/MyGpuPkg
+OUTPUT_DIRECTORY = Build/MetaXPkg
 SUPPORTED_ARCHITECTURES = X64
 BUILD_TARGETS = DEBUG|RELEASE
 SKUID_IDENTIFIER = DEFAULT
@@ -26,7 +26,20 @@ SKUID_IDENTIFIER = DEFAULT
   StackCheckLib|MdePkg/Library/StackCheckLibNull/StackCheckLibNull.inf
   BaseLib|MdePkg/Library/BaseLib/BaseLib.inf
   UefiApplicationEntryPoint|MdePkg/Library/UefiApplicationEntryPoint/UefiApplicationEntryPoint.inf
+  FrameBufferBltLib|MdeModulePkg/Library/FrameBufferBltLib/FrameBufferBltLib.inf
+  DxeServicesTableLib|MdePkg/Library/DxeServicesTableLib/DxeServicesTableLib.inf
+  ShellCEntryLib|ShellPkg/Library/UefiShellCEntryLib/UefiShellCEntryLib.inf
+
+
+[PcdsFixedAtBuild]
+  gEfiMdePkgTokenSpaceGuid.PcdDebugPropertyMask|0x0f
+  gEfiMdePkgTokenSpaceGuid.PcdDebugPrintErrorLevel|0xFFFFFFFF
+  gEfiMdeModulePkgTokenSpaceGuid.PcdSerialRegisterBase|0x3F8
+  gEfiMdeModulePkgTokenSpaceGuid.PcdSerialBaudRate|115200
+  gEfiMdeModulePkgTokenSpaceGuid.PcdSerialRegisterStride|1
+  gEfiMdeModulePkgTokenSpaceGuid.PcdSerialUseMmio|FALSE
 
 [Components]
-  MyGpuPkg/MyGpuGopDxe/MyGpuGopDxe.inf
-  MyGpuPkg/GopTest/GopTest.inf
+  MetaXPkg/MetaXGopDxe/MetaXGopDxe.inf
+  MetaXPkg/BltTest/BltTest.inf
+  MetaXPkg/ModeTest/ModeTest.inf

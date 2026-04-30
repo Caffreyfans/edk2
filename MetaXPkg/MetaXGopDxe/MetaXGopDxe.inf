@@ -1,21 +1,27 @@
 [Defines]
     INF_VERSION                     = 0x00010005
-    BASE_NAME                       = MyGpuGopDxe
+    BASE_NAME                       = MetaXGopDxe
     FILE_GUID                       = 12345678-1234-1234-1234-123456789abc
     MODULE_TYPE                     = UEFI_DRIVER
     VERSION_STRING                  = 1.0
-    ENTRY_POINT                     = MyGpuGopDxeEntryPoint
+    ENTRY_POINT                     = MetaXGopDxeEntryPoint
+    PCI_VENDOR_ID                   = 0xAAAA
+    PCI_DEVICE_ID                   = 0xBBBB
+    PCI_CLASS_CODE                  = 0x000380
+    PCI_COMPRESS                    = FALSE
+    PCI_ROM                         = TRUE
 
 [Sources]
-    gop.c
-    components.c
-    driver.h
     ComponentName.c
+    driver.c
+    gop.c
+    Initialize.c
+    MetaXGpu.h
 
 [Packages]
     MdePkg/MdePkg.dec
     MdeModulePkg/MdeModulePkg.dec
-    MyGpuPkg/MyGpuPkg.dec
+    MetaXPkg/MetaXPkg.dec
 
 [LibraryClasses]
     UefiDriverEntryPoint
@@ -23,7 +29,9 @@
     UefiLib
     BaseMemoryLib
     MemoryAllocationLib
+    FrameBufferBltLib
     DebugLib
+    DxeServicesTableLib
 
 [Protocols]
     gEfiGraphicsOutputProtocolGuid

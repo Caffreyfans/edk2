@@ -1,0 +1,24 @@
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = ModeTest  
+  FILE_GUID                      = 3B7743D1-5B6C-42E2-AEE7-9F0B4D6A2201
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = ShellCEntryLib
+
+[Sources]
+  ModeTest.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  ShellPkg/ShellPkg.dec
+
+[Protocols]
+  gEfiGraphicsOutputProtocolGuid
+
+[LibraryClasses]
+  ShellCEntryLib
+  UefiLib
+  UefiBootServicesTableLib
+  MemoryAllocationLib
+  BaseLib

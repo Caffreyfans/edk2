@@ -1,44 +1,145 @@
-#ifndef __DRIVER_H__
-#define __DRIVER_H__
+/** @file
+  Metax Video Controller Driver
 
-#include <Uefi.h>
+  Copyright (c) 2006 - 2019, Intel Corporation. All rights reserved.<BR>
+  SPDX-License-Identifier: BSD-2-Clause-Patent
+
+**/
+
+#ifndef __METAX_GPU__
+#define __METAX_GPU__
+
+#include <PiDxe.h>
+#include <Protocol/GraphicsOutput.h>
 #include <Protocol/PciIo.h>
+#include <Protocol/DriverSupportedEfiVersion.h>
+#include <Protocol/DevicePath.h>
+
+#include <Library/DebugLib.h>
+#include <Library/UefiDriverEntryPoint.h>
 #include <Library/UefiLib.h>
+#include <Library/PcdLib.h>
+#include <Library/MemoryAllocationLib.h>
+#include <Library/UefiBootServicesTableLib.h>
+#include <Library/BaseMemoryLib.h>
+#include <Library/DevicePathLib.h>
+#include <Library/TimerLib.h>
+#include <Library/FrameBufferBltLib.h>
 
-#define MYGPU_WIDTH 800
-#define MYGPU_HEIGHT 800
-#define MYGPU_BPP 4
-#define MYGPU_FB_SIZE (MYGPU_WIDTH * MYGPU_HEIGHT * MYGPU_BPP)
+#include <IndustryStandard/Pci.h>
+#include <IndustryStandard/Acpi.h>
 
-#define REG_WIDTH 0x00
-#define REG_HEIGHT 0x04
-#define REG_ENABLE 0x08
-#define REG_FLUSH 0x0C
+#define METAXGPU_BPP 4
+
+/**
+ * MMIO register offsets
+ */
+#define REG_WIDTH (0x00)
+#define REG_HEIGHT (0x04)
+#define REG_FB_SIZE (0x08)
+#define REG_FLUSH (0x0C)
+
+#define REG_MODE (0x10)
+#define REG_MAX_MODE (0x18)
+#define REG_STRIDE (0x1C)
+
+#define PIXEL_RED_SHIFT 0
+#define PIXEL_GREEN_SHIFT 3
+#define PIXEL_BLUE_SHIFT 6
+
+#define PIXEL_RED_MASK (BIT7 | BIT6 | BIT5)
+#define PIXEL_GREEN_MASK (BIT4 | BIT3 | BIT2)
+#define PIXEL_BLUE_MASK (BIT1 | BIT0)
+
+#define PIXEL_TO_COLOR_BYTE(pixel, mask, shift) ((UINT8)((pixel & mask) << shift))
+#define PIXEL_TO_RED_BYTE(pixel) PIXEL_TO_COLOR_BYTE(pixel, PIXEL_RED_MASK, PIXEL_RED_SHIFT)
+#define PIXEL_TO_GREEN_BYTE(pixel) PIXEL_TO_COLOR_BYTE(pixel, PIXEL_GREEN_MASK, PIXEL_GREEN_SHIFT)
+#define PIXEL_TO_BLUE_BYTE(pixel) PIXEL_TO_COLOR_BYTE(pixel, PIXEL_BLUE_MASK, PIXEL_BLUE_SHIFT)
+
+#define RGB_BYTES_TO_PIXEL(Red, Green, Blue)                    \
+  (UINT8)((((Red) >> PIXEL_RED_SHIFT) & PIXEL_RED_MASK) |       \
+          (((Green) >> PIXEL_GREEN_SHIFT) & PIXEL_GREEN_MASK) | \
+          (((Blue) >> PIXEL_BLUE_SHIFT) & PIXEL_BLUE_MASK))
+
+#define PIXEL24_RED_MASK 0x00ff0000
+#define PIXEL24_GREEN_MASK 0x0000ff00
+#define PIXEL24_BLUE_MASK 0x000000ff
+
+#define GRAPHICS_OUTPUT_INVALIDE_MODE_NUMBER 0xffff
+
+typedef enum
+{
+  METAX_VIDEO_G100 = 1,
+  METAX_VIDEO_N400,
+} METAX_VIDEO_VARIANT;
 
 typedef struct
 {
-    EFI_HANDLE Handle;
-    EFI_PCI_IO_PROTOCOL *PciIo;
+  UINT8 SubClass;
+  UINT16 VendorId;
+  UINT16 DeviceId;
+  METAX_VIDEO_VARIANT Variant;
+  CHAR16 *Name;
+} METAX_VIDEO_CARD;
 
-    EFI_PHYSICAL_ADDRESS MmioBase;
-    UINT64 MmioSize;
+typedef struct
+{
+  UINT32 InternalModeIndex; // points into card-specific mode table
+  UINT32 HorizontalResolution;
+  UINT32 VerticalResolution;
+  UINT32 ColorDepth;
+} METAX_VIDEO_MODE_DATA;
 
-    EFI_PHYSICAL_ADDRESS FramebufferBase;
-    UINT64 FrameBufferSize;
+typedef struct
+{
+  UINT16 VendorId;
+  UINT16 DeviceId;
+  UINT16 Command;
+  UINT16 Status;
+  UINT8 RevisionId;
+  UINT8 ProgIf;
+  UINT8 SubClass;
+  UINT8 BaseClass;
+} PCI_TYPE0_HEAD_MIN;
 
-    EFI_GRAPHICS_OUTPUT_PROTOCOL Gop;
-    EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE GopMode;
-    EFI_GRAPHICS_OUTPUT_MODE_INFORMATION GopModeInfo;
+typedef struct
+{
+  EFI_HANDLE Handle;
+  EFI_PCI_IO_PROTOCOL *PciIo;
+  UINT64 OriginalPciAttributes;
+  EFI_GRAPHICS_OUTPUT_PROTOCOL GraphicsOutput;
+  EFI_DEVICE_PATH_PROTOCOL *GopDevicePath;
 
-    UINT32 Signature;
-} MYGPU_PRIVATE;
+  UINTN MaxMode;
+  METAX_VIDEO_MODE_DATA *ModeData;
 
-extern EFI_COMPONENT_NAME_PROTOCOL   gQemuVideoComponentName;
-extern EFI_COMPONENT_NAME2_PROTOCOL  gQemuVideoComponentName2;
+  METAX_VIDEO_VARIANT Variant;
+  FRAME_BUFFER_CONFIGURE *FrameBufferBltConfigure;
+  UINTN FrameBufferBltConfigureSize;
+  UINT8 FrameBufferVramBarIndex;
+
+  UINT8 Edid[128];
+} METAX_VIDEO_PRIVATE_DATA;
+
+///
+/// Card-specific Video Mode structures
+///
+typedef struct
+{
+  UINT32 Width;
+  UINT32 Height;
+  UINT32 ColorDepth;
+} METAX_VIDEO_MODES;
+
+#define METAX_VIDEO_PRIVATE_DATA_FROM_GRAPHICS_OUTPUT_THIS(a) \
+  BASE_CR(a, METAX_VIDEO_PRIVATE_DATA, GraphicsOutput)
+
+extern EFI_COMPONENT_NAME_PROTOCOL gMetaXVideoComponentName;
+extern EFI_COMPONENT_NAME2_PROTOCOL gMetaXVideoComponentName2;
 
 EFI_STATUS
 EFIAPI
-MyGpuGopQueryMode(
+MetaXVideoGraphicsOutputQueryMode(
     IN EFI_GRAPHICS_OUTPUT_PROTOCOL *This,
     IN UINT32 ModeNumber,
     OUT UINTN *SizeOfInfo,
@@ -46,15 +147,15 @@ MyGpuGopQueryMode(
 
 EFI_STATUS
 EFIAPI
-MyGpuGopSetMode(
+MetaXVideoGraphicsOutputSetMode(
     IN EFI_GRAPHICS_OUTPUT_PROTOCOL *This,
     IN UINT32 ModeNumber);
 
 EFI_STATUS
 EFIAPI
-MyGpuGopBlt(
+MetaXVideoGraphicsOutputBlt(
     IN EFI_GRAPHICS_OUTPUT_PROTOCOL *This,
-    IN EFI_GRAPHICS_OUTPUT_BLT_PIXEL *BltBuffer,
+    IN EFI_GRAPHICS_OUTPUT_BLT_PIXEL *BltBuffer OPTIONAL,
     IN EFI_GRAPHICS_OUTPUT_BLT_OPERATION BltOperation,
     IN UINTN SourceX,
     IN UINTN SourceY,
@@ -62,8 +163,7 @@ MyGpuGopBlt(
     IN UINTN DestinationY,
     IN UINTN Width,
     IN UINTN Height,
-    IN UINTN Delta OPTIONAL);
-
+    IN UINTN Delta);
 
 //
 // EFI Component Name Functions
@@ -110,11 +210,10 @@ MyGpuGopBlt(
 **/
 EFI_STATUS
 EFIAPI
-QemuVideoComponentNameGetDriverName (
-  IN  EFI_COMPONENT_NAME_PROTOCOL  *This,
-  IN  CHAR8                        *Language,
-  OUT CHAR16                       **DriverName
-  );
+MetaXVideoComponentNameGetDriverName(
+    IN EFI_COMPONENT_NAME_PROTOCOL *This,
+    IN CHAR8 *Language,
+    OUT CHAR16 **DriverName);
 
 /**
   Retrieves a Unicode string that is the user readable name of the controller
@@ -186,13 +285,32 @@ QemuVideoComponentNameGetDriverName (
 **/
 EFI_STATUS
 EFIAPI
-QemuVideoComponentNameGetControllerName (
-  IN  EFI_COMPONENT_NAME_PROTOCOL  *This,
-  IN  EFI_HANDLE                   ControllerHandle,
-  IN  EFI_HANDLE                   ChildHandle        OPTIONAL,
-  IN  CHAR8                        *Language,
-  OUT CHAR16                       **ControllerName
-  );
+MetaXVideoComponentNameGetControllerName(
+    IN EFI_COMPONENT_NAME_PROTOCOL *This,
+    IN EFI_HANDLE ControllerHandle,
+    IN EFI_HANDLE ChildHandle OPTIONAL,
+    IN CHAR8 *Language,
+    OUT CHAR16 **ControllerName);
 
+EFI_STATUS
+MetaXVideoGraphicsOutputConstructor(
+    METAX_VIDEO_PRIVATE_DATA *Private);
 
-#endif // __DRIVER_H__
+EFI_STATUS
+MetaXVideoGraphicsOutputDestructor(
+    METAX_VIDEO_PRIVATE_DATA *Private);
+
+/**
+  Construct the valid video modes for MetaXVideo.
+
+**/
+EFI_STATUS
+MetaXVideoModeSetup(
+    METAX_VIDEO_PRIVATE_DATA *Private);
+
+VOID MetaXPciWrite(
+    METAX_VIDEO_PRIVATE_DATA *Private,
+    UINT32 Reg,
+    UINT32 Data);
+
+#endif // __METAX_GPU__
