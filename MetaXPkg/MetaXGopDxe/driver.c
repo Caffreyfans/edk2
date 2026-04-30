@@ -60,11 +60,12 @@ EFI_DRIVER_BINDING_PROTOCOL gMetaXGpuDriverBinding = {
     NULL};
 
 METAX_VIDEO_CARD gMetaXVideoCardList[] = {
-    {PCI_CLASS_DISPLAY_OTHER,
+    {PCI_CLASS_DISPLAY_VGA,
      METAX_VENDOR_ID,
      N400_VENDOR_ID,
      METAX_VIDEO_N400,
-     L"N400"}};
+     L"N400"},
+    {0, 0, 0, 0, NULL}};
 
 static METAX_VIDEO_CARD *
 MetaxVideoDetect(IN UINT8 SubClass, IN UINT16 VendorId, IN UINT16 DeviceId)
@@ -85,64 +86,6 @@ MetaxVideoDetect(IN UINT8 SubClass, IN UINT16 VendorId, IN UINT16 DeviceId)
 
     return NULL;
 }
-
-// STATIC
-// EFI_STATUS
-// MetaXGpuGetBarBase(
-//     IN EFI_PCI_IO_PROTOCOL *PciIo,
-//     IN UINT8 BarIndex,
-//     OUT EFI_PHYSICAL_ADDRESS *Base,
-//     OUT UINT64 *Size)
-// {
-//     EFI_STATUS Status;
-//     UINT64 Supports;
-//     VOID *Resources;
-//     EFI_ACPI_ADDRESS_SPACE_DESCRIPTOR *Desc;
-
-//     if (PciIo == NULL || Base == NULL || Size == NULL)
-//     {
-//         return EFI_INVALID_PARAMETER;
-//     }
-
-//     *Base = 0;
-//     *Size = 0;
-//     Supports = 0;
-//     Resources = NULL;
-
-//     Status = PciIo->GetBarAttributes(
-//         PciIo,
-//         BarIndex,
-//         &Supports,
-//         &Resources);
-
-//     if (EFI_ERROR(Status))
-//     {
-//         return Status;
-//     }
-
-//     if (Resources == NULL)
-//     {
-//         return EFI_NOT_FOUND;
-//     }
-
-//     Desc = (EFI_ACPI_ADDRESS_SPACE_DESCRIPTOR *)Resources;
-
-//     while (Desc->Desc == ACPI_ADDRESS_SPACE_DESCRIPTOR)
-//     {
-//         if (Desc->ResType == ACPI_ADDRESS_SPACE_TYPE_MEM)
-//         {
-//             *Base = Desc->AddrRangeMin;
-//             *Size = Desc->AddrLen;
-//             FreePool(Resources);
-//             return EFI_SUCCESS;
-//         }
-
-//         Desc++;
-//     }
-
-//     FreePool(Resources);
-//     return EFI_NOT_FOUND;
-// }
 
 VOID MetaXPciWrite(
     METAX_VIDEO_PRIVATE_DATA *Private,

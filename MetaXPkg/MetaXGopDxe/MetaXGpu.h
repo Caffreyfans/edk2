@@ -40,8 +40,8 @@
 #define REG_FLUSH (0x0C)
 
 #define REG_MODE (0x10)
-#define REG_MAX_MODE (0x18)
-#define REG_STRIDE (0x1C)
+#define REG_MAX_MODE (0x14)
+#define REG_STRIDE (0x18)
 
 #define PIXEL_RED_SHIFT 0
 #define PIXEL_GREEN_SHIFT 3
