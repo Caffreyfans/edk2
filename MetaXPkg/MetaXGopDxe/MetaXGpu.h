@@ -300,6 +300,12 @@ EFI_STATUS
 MetaXVideoGraphicsOutputDestructor(
     METAX_VIDEO_PRIVATE_DATA *Private);
 
+UINT32
+MetaXgpuChooseDefaultModeFromEdid(
+    IN CONST UINT8 *Edid,
+    IN UINT32 EdidSize,
+    IN CONST METAX_VIDEO_MODE_DATA *ModeTable,
+    IN UINT32 ModeCount);
 /**
   Construct the valid video modes for MetaXVideo.
 

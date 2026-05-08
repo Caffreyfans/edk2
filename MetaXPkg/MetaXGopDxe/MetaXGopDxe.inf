@@ -16,6 +16,7 @@
     driver.c
     gop.c
     Initialize.c
+    edid.c
     MetaXGpu.h
 
 [Packages]
