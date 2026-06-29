@@ -5,8 +5,8 @@
     MODULE_TYPE                     = UEFI_DRIVER
     VERSION_STRING                  = 1.0
     ENTRY_POINT                     = MetaXGopDxeEntryPoint
-    PCI_VENDOR_ID                   = 0xAAAA
-    PCI_DEVICE_ID                   = 0xBBBB
+    PCI_VENDOR_ID                   = 0x9999
+    PCI_DEVICE_ID                   = 0x0001
     PCI_CLASS_CODE                  = 0x000380
     PCI_COMPRESS                    = FALSE
     PCI_ROM                         = TRUE
@@ -33,6 +33,7 @@
     FrameBufferBltLib
     DebugLib
     DxeServicesTableLib
+    TimerLib
 
 [Protocols]
     gEfiGraphicsOutputProtocolGuid

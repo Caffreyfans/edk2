@@ -100,6 +100,555 @@ VOID MetaXPciWrite(
                               &Data);
 }
 
+UINT32
+MetaXPciRead(
+    METAX_VIDEO_PRIVATE_DATA *Private,
+    UINT32 Reg)
+{
+    UINT32 Data;
+
+    Data = 0;
+    Private->PciIo->Mem.Read(Private->PciIo,
+                             EfiPciIoWidthUint32,
+                             PCI_BAR_IDX0,
+                             Reg,
+                             1,
+                             &Data);
+
+    return Data;
+}
+
+STATIC
+CONST CHAR8 *
+MetaXVideoDpTrainingStateName(
+    UINT32 State)
+{
+    switch (State)
+    {
+    case DP_TRAINING_STATE_IDLE:
+        return "idle";
+    case DP_TRAINING_STATE_CLOCK_RECOVERY:
+        return "clock-recovery";
+    case DP_TRAINING_STATE_CHANNEL_EQUALIZATION:
+        return "channel-equalization";
+    case DP_TRAINING_STATE_TRAINED:
+        return "trained";
+    case DP_TRAINING_STATE_FAILED:
+        return "failed";
+    default:
+        return "unknown";
+    }
+}
+
+STATIC
+VOID
+MetaXVideoDpDumpLinkSummary(
+    METAX_VIDEO_PRIVATE_DATA *Private)
+{
+    UINT32 MainLinkStatus;
+    UINT32 RequiredKbps;
+    UINT32 AvailableKbps;
+    UINT32 TrainingState;
+
+    MainLinkStatus = MetaXPciRead(Private, REG_DP_MAIN_LINK_STATUS);
+    RequiredKbps = MetaXPciRead(Private, REG_DP_MSA_REQUIRED_KBPS);
+    AvailableKbps = MetaXPciRead(Private, REG_DP_MSA_AVAILABLE_KBPS);
+    TrainingState = MetaXPciRead(Private, REG_DP_TRAINING_STATE);
+
+    DEBUG((
+        DEBUG_INFO,
+        "MetaXVideo DP: main-link status=0x%08x state=%a required=%u kbps available=%u kbps\n",
+        MainLinkStatus,
+        MetaXVideoDpTrainingStateName(TrainingState),
+        RequiredKbps,
+        AvailableKbps));
+}
+
+STATIC
+EFI_STATUS
+MetaXVideoDpAuxReadByte(
+    METAX_VIDEO_PRIVATE_DATA *Private,
+    UINT32 AuxAddress,
+    UINT8 *Data)
+{
+    UINT32 Value;
+    UINT32 Status;
+
+    if ((Private == NULL) || (Data == NULL))
+    {
+        return EFI_INVALID_PARAMETER;
+    }
+
+    MetaXPciWrite(Private, REG_DP_AUX_ADDR, AuxAddress);
+    Value = MetaXPciRead(Private, REG_DP_AUX_DATA);
+    Status = MetaXPciRead(Private, REG_DP_AUX_STATUS);
+
+    if ((Status & DP_AUX_STATUS_ACK) == 0)
+    {
+        DEBUG((
+            DEBUG_ERROR,
+            "MetaXVideo DP: AUX read failed, Addr=0x%08x Status=0x%08x\n",
+            AuxAddress,
+            Status));
+        return EFI_DEVICE_ERROR;
+    }
+
+    *Data = (UINT8)Value;
+    return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+MetaXVideoDpAuxWriteByte(
+    METAX_VIDEO_PRIVATE_DATA *Private,
+    UINT32 AuxAddress,
+    UINT8 Data)
+{
+    UINT32 Status;
+
+    if (Private == NULL)
+    {
+        return EFI_INVALID_PARAMETER;
+    }
+
+    MetaXPciWrite(Private, REG_DP_AUX_ADDR, AuxAddress);
+    MetaXPciWrite(Private, REG_DP_AUX_DATA, Data);
+    Status = MetaXPciRead(Private, REG_DP_AUX_STATUS);
+
+    if ((Status & DP_AUX_STATUS_ACK) == 0)
+    {
+        DEBUG((
+            DEBUG_ERROR,
+            "MetaXVideo DP: AUX write failed, Addr=0x%08x Data=0x%02x Status=0x%08x\n",
+            AuxAddress,
+            Data,
+            Status));
+        return EFI_DEVICE_ERROR;
+    }
+
+    return EFI_SUCCESS;
+}
+
+STATIC
+UINT8
+MetaXVideoDpSelectLinkRate(
+    UINT8 DpcdMaxLinkRate)
+{
+    if (DpcdMaxLinkRate >= DP_DPCD_LINK_RATE_5_4GBPS)
+    {
+        return DP_DPCD_LINK_RATE_5_4GBPS;
+    }
+
+    if (DpcdMaxLinkRate >= DP_DPCD_LINK_RATE_2_7GBPS)
+    {
+        return DP_DPCD_LINK_RATE_2_7GBPS;
+    }
+
+    return DP_DPCD_LINK_RATE_1_62GBPS;
+}
+
+STATIC
+UINT8
+MetaXVideoDpSelectLaneCount(
+    UINT8 DpcdMaxLaneCount)
+{
+    UINT8 LaneCount;
+
+    LaneCount = DpcdMaxLaneCount & DP_DPCD_LANE_COUNT_MASK;
+    if (LaneCount >= DP_DPCD_MAX_LANE_COUNT_SUPPORTED)
+    {
+        return DP_DPCD_MAX_LANE_COUNT_SUPPORTED;
+    }
+
+    if (LaneCount >= 2)
+    {
+        return 2;
+    }
+
+    return 1;
+}
+
+STATIC
+BOOLEAN
+MetaXVideoDpClockRecoveryDone(
+    UINT8 Lane01Status,
+    UINT8 Lane23Status,
+    UINT8 LaneCount)
+{
+    if ((Lane01Status & DP_LANE0_CR_DONE) == 0)
+    {
+        return FALSE;
+    }
+
+    if ((LaneCount >= 2) && ((Lane01Status & DP_LANE1_CR_DONE) == 0))
+    {
+        return FALSE;
+    }
+
+    if ((LaneCount >= 3) && ((Lane23Status & DP_LANE2_CR_DONE) == 0))
+    {
+        return FALSE;
+    }
+
+    if ((LaneCount >= 4) && ((Lane23Status & DP_LANE3_CR_DONE) == 0))
+    {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+STATIC
+BOOLEAN
+MetaXVideoDpChannelEqualizationDone(
+    UINT8 Lane01Status,
+    UINT8 Lane23Status,
+    UINT8 AlignStatus,
+    UINT8 LaneCount)
+{
+    if ((AlignStatus & DP_INTERLANE_ALIGN_DONE) == 0)
+    {
+        return FALSE;
+    }
+
+    if ((Lane01Status & (DP_LANE0_CHANNEL_EQ_DONE | DP_LANE0_SYMBOL_LOCKED)) !=
+        (DP_LANE0_CHANNEL_EQ_DONE | DP_LANE0_SYMBOL_LOCKED))
+    {
+        return FALSE;
+    }
+
+    if ((LaneCount >= 2) &&
+        ((Lane01Status & (DP_LANE1_CHANNEL_EQ_DONE | DP_LANE1_SYMBOL_LOCKED)) !=
+         (DP_LANE1_CHANNEL_EQ_DONE | DP_LANE1_SYMBOL_LOCKED)))
+    {
+        return FALSE;
+    }
+
+    if ((LaneCount >= 3) &&
+        ((Lane23Status & (DP_LANE2_CHANNEL_EQ_DONE | DP_LANE2_SYMBOL_LOCKED)) !=
+         (DP_LANE2_CHANNEL_EQ_DONE | DP_LANE2_SYMBOL_LOCKED)))
+    {
+        return FALSE;
+    }
+
+    if ((LaneCount >= 4) &&
+        ((Lane23Status & (DP_LANE3_CHANNEL_EQ_DONE | DP_LANE3_SYMBOL_LOCKED)) !=
+         (DP_LANE3_CHANNEL_EQ_DONE | DP_LANE3_SYMBOL_LOCKED)))
+    {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+STATIC
+EFI_STATUS
+MetaXVideoDpReadLinkStatus(
+    METAX_VIDEO_PRIVATE_DATA *Private,
+    UINT8 *Lane01Status,
+    UINT8 *Lane23Status,
+    UINT8 *AlignStatus)
+{
+    EFI_STATUS Status;
+
+    Status = MetaXVideoDpAuxReadByte(
+        Private,
+        DP_DPCD_LANE0_1_STATUS,
+        Lane01Status);
+    if (EFI_ERROR(Status))
+    {
+        return Status;
+    }
+
+    Status = MetaXVideoDpAuxReadByte(
+        Private,
+        DP_DPCD_LANE2_3_STATUS,
+        Lane23Status);
+    if (EFI_ERROR(Status))
+    {
+        return Status;
+    }
+
+    return MetaXVideoDpAuxReadByte(
+        Private,
+        DP_DPCD_LANE_ALIGN_STATUS_UPDATED,
+        AlignStatus);
+}
+
+STATIC
+EFI_STATUS
+MetaXVideoDpSetTrainingPattern(
+    METAX_VIDEO_PRIVATE_DATA *Private,
+    UINT8 Pattern)
+{
+    return MetaXVideoDpAuxWriteByte(
+        Private,
+        DP_DPCD_TRAINING_PATTERN_SET,
+        Pattern);
+}
+
+STATIC
+EFI_STATUS
+MetaXVideoDpConfigureLaneDrive(
+    METAX_VIDEO_PRIVATE_DATA *Private,
+    UINT8 LaneCount)
+{
+    EFI_STATUS Status;
+    UINT8 Index;
+
+    for (Index = 0; Index < LaneCount; Index++)
+    {
+        Status = MetaXVideoDpAuxWriteByte(
+            Private,
+            DP_DPCD_TRAINING_LANE0_SET + Index,
+            DP_TRAINING_LANE_SET_DEFAULT);
+        if (EFI_ERROR(Status))
+        {
+            return Status;
+        }
+    }
+
+    return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+MetaXVideoDpLinkTrain(
+    METAX_VIDEO_PRIVATE_DATA *Private,
+    UINT8 DpcdMaxLinkRate,
+    UINT8 DpcdMaxLaneCount)
+{
+    EFI_STATUS Status;
+    UINT8 LinkRate;
+    UINT8 LaneCount;
+    UINT8 Attempt;
+    UINT8 Lane01Status;
+    UINT8 Lane23Status;
+    UINT8 AlignStatus;
+
+    LinkRate = MetaXVideoDpSelectLinkRate(DpcdMaxLinkRate);
+    LaneCount = MetaXVideoDpSelectLaneCount(DpcdMaxLaneCount);
+    Lane01Status = 0;
+    Lane23Status = 0;
+    AlignStatus = 0;
+
+    DEBUG((
+        DEBUG_INFO,
+        "MetaXVideo DP: link training start, link=0x%02x lanes=%u\n",
+        LinkRate,
+        LaneCount));
+
+    MetaXPciWrite(Private, REG_DP_TRAINING_STATUS, 0);
+    MetaXPciWrite(Private, REG_DP_LINK_RATE, LinkRate);
+    MetaXPciWrite(Private, REG_DP_LANE_COUNT, LaneCount);
+
+    Status = MetaXVideoDpAuxWriteByte(Private, DP_DPCD_LINK_BW_SET, LinkRate);
+    if (EFI_ERROR(Status))
+    {
+        goto Done;
+    }
+
+    Status = MetaXVideoDpAuxWriteByte(Private, DP_DPCD_LANE_COUNT_SET, LaneCount);
+    if (EFI_ERROR(Status))
+    {
+        goto Done;
+    }
+
+    Status = MetaXVideoDpConfigureLaneDrive(Private, LaneCount);
+    if (EFI_ERROR(Status))
+    {
+        goto Done;
+    }
+
+    Status = MetaXVideoDpSetTrainingPattern(Private, DP_TRAINING_PATTERN_1);
+    if (EFI_ERROR(Status))
+    {
+        goto Done;
+    }
+
+    for (Attempt = 0; Attempt < DP_LINK_TRAINING_MAX_ATTEMPTS; Attempt++)
+    {
+        MicroSecondDelay(DP_LINK_TRAINING_POLL_DELAY_US);
+        Status = MetaXVideoDpReadLinkStatus(
+            Private,
+            &Lane01Status,
+            &Lane23Status,
+            &AlignStatus);
+        if (EFI_ERROR(Status))
+        {
+            goto Done;
+        }
+
+        if (MetaXVideoDpClockRecoveryDone(Lane01Status, Lane23Status, LaneCount))
+        {
+            break;
+        }
+    }
+
+    if (Attempt == DP_LINK_TRAINING_MAX_ATTEMPTS)
+    {
+        DEBUG((
+            DEBUG_ERROR,
+            "MetaXVideo DP: clock recovery failed, lane01=0x%02x lane23=0x%02x\n",
+            Lane01Status,
+            Lane23Status));
+        Status = EFI_TIMEOUT;
+        goto Done;
+    }
+
+    Status = MetaXVideoDpSetTrainingPattern(Private, DP_TRAINING_PATTERN_2);
+    if (EFI_ERROR(Status))
+    {
+        goto Done;
+    }
+
+    for (Attempt = 0; Attempt < DP_LINK_TRAINING_MAX_ATTEMPTS; Attempt++)
+    {
+        MicroSecondDelay(DP_LINK_TRAINING_POLL_DELAY_US);
+        Status = MetaXVideoDpReadLinkStatus(
+            Private,
+            &Lane01Status,
+            &Lane23Status,
+            &AlignStatus);
+        if (EFI_ERROR(Status))
+        {
+            goto Done;
+        }
+
+        if (MetaXVideoDpChannelEqualizationDone(
+                Lane01Status,
+                Lane23Status,
+                AlignStatus,
+                LaneCount))
+        {
+            break;
+        }
+    }
+
+    if (Attempt == DP_LINK_TRAINING_MAX_ATTEMPTS)
+    {
+        DEBUG((
+            DEBUG_ERROR,
+            "MetaXVideo DP: channel equalization failed, lane01=0x%02x lane23=0x%02x align=0x%02x\n",
+            Lane01Status,
+            Lane23Status,
+            AlignStatus));
+        Status = EFI_TIMEOUT;
+        goto Done;
+    }
+
+    MetaXPciWrite(Private, REG_DP_TRAINING_STATUS, DP_TRAINING_DONE);
+    DEBUG((DEBUG_INFO, "MetaXVideo DP: link training done\n"));
+    MetaXVideoDpDumpLinkSummary(Private);
+    Status = EFI_SUCCESS;
+
+Done:
+    MetaXVideoDpSetTrainingPattern(Private, DP_TRAINING_PATTERN_DISABLE);
+    if (EFI_ERROR(Status))
+    {
+        MetaXPciWrite(Private, REG_DP_TRAINING_STATUS, 0);
+    }
+
+    return Status;
+}
+
+EFI_STATUS
+MetaXVideoReadDpEdid(
+    METAX_VIDEO_PRIVATE_DATA *Private)
+{
+    EFI_STATUS Status;
+    UINT32 Hpd;
+    UINT32 EdidSize;
+    UINT32 Index;
+    UINT8 DpcdRevision;
+    UINT8 DpcdMaxLinkRate;
+    UINT8 DpcdMaxLaneCount;
+
+    if (Private == NULL)
+    {
+        return EFI_INVALID_PARAMETER;
+    }
+
+    ZeroMem(Private->Edid, sizeof(Private->Edid));
+
+    Hpd = MetaXPciRead(Private, REG_DP_HPD);
+    if ((Hpd & DP_HPD_CONNECTED) == 0)
+    {
+        DEBUG((DEBUG_WARN, "MetaXVideo DP: no sink connected, HPD=0x%08x\n", Hpd));
+        return EFI_NOT_FOUND;
+    }
+
+    Status = MetaXVideoDpAuxReadByte(Private, DP_DPCD_REVISION, &DpcdRevision);
+    if (EFI_ERROR(Status))
+    {
+        return Status;
+    }
+
+    Status = MetaXVideoDpAuxReadByte(Private, DP_DPCD_MAX_LINK_RATE, &DpcdMaxLinkRate);
+    if (EFI_ERROR(Status))
+    {
+        return Status;
+    }
+
+    Status = MetaXVideoDpAuxReadByte(Private, DP_DPCD_MAX_LANE_COUNT, &DpcdMaxLaneCount);
+    if (EFI_ERROR(Status))
+    {
+        return Status;
+    }
+
+    DEBUG((
+        DEBUG_INFO,
+        "MetaXVideo DP: DPCD rev=0x%02x max-link=0x%02x lanes=%u\n",
+        DpcdRevision,
+        DpcdMaxLinkRate,
+        DpcdMaxLaneCount));
+
+    if (DpcdRevision < DP_DPCD_REV_1_0)
+    {
+        DEBUG((DEBUG_WARN, "MetaXVideo DP: unsupported DPCD revision 0x%02x\n", DpcdRevision));
+        return EFI_UNSUPPORTED;
+    }
+
+    Status = MetaXVideoDpLinkTrain(Private, DpcdMaxLinkRate, DpcdMaxLaneCount);
+    if (EFI_ERROR(Status))
+    {
+        return Status;
+    }
+
+    EdidSize = MetaXPciRead(Private, REG_DP_EDID_SIZE);
+    if ((EdidSize == 0) || (EdidSize > sizeof(Private->Edid)))
+    {
+        EdidSize = sizeof(Private->Edid);
+    }
+
+    for (Index = 0; Index < EdidSize; Index++)
+    {
+        Status = MetaXVideoDpAuxReadByte(
+            Private,
+            DP_AUX_EDID_BASE + Index,
+            &Private->Edid[Index]);
+        if (EFI_ERROR(Status))
+        {
+            return Status;
+        }
+    }
+
+    DEBUG((
+        DEBUG_INFO,
+        "MetaXVideo DP: EDID %u bytes, header=%02x %02x %02x %02x %02x %02x %02x %02x\n",
+        EdidSize,
+        Private->Edid[0],
+        Private->Edid[1],
+        Private->Edid[2],
+        Private->Edid[3],
+        Private->Edid[4],
+        Private->Edid[5],
+        Private->Edid[6],
+        Private->Edid[7]));
+
+    return EFI_SUCCESS;
+}
+
 EFI_STATUS
 EFIAPI
 MetaXGpuDriverBindingSupoorted(
