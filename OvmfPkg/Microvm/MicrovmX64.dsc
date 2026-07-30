@@ -131,6 +131,7 @@
 !include MdePkg/MdeLibs.dsc.inc
 
 [LibraryClasses]
+  GptLib|MdeModulePkg/Library/GptLib/GptLib.inf
   SmmRelocationLib|OvmfPkg/Library/SmmRelocationLib/SmmRelocationLib.inf
   PcdLib|MdePkg/Library/BasePcdLibNull/BasePcdLibNull.inf
   TimerLib|MdePkg/Library/SecPeiDxeTimerLibCpu/SecPeiDxeTimerLibCpu.inf
@@ -396,6 +397,7 @@
   PcdLib|MdePkg/Library/DxePcdLib/DxePcdLib.inf
   ResetSystemLib|OvmfPkg/Library/ResetSystemLib/DxeResetSystemLibMicrovm.inf
   HobLib|MdePkg/Library/DxeHobLib/DxeHobLib.inf
+  MapMmioLib|OvmfPkg/Library/MapMmioLib/MapMmioLib.inf
   MemoryAllocationLib|MdePkg/Library/UefiMemoryAllocationLib/UefiMemoryAllocationLib.inf
   ReportStatusCodeLib|MdeModulePkg/Library/DxeReportStatusCodeLib/DxeReportStatusCodeLib.inf
   UefiScsiLib|MdePkg/Library/UefiScsiLib/UefiScsiLib.inf
@@ -595,6 +597,8 @@
   #
   gUefiCpuPkgTokenSpaceGuid.PcdFirstTimeWakeUpAPsBySipi|FALSE
 
+  gEfiMdePkgTokenSpaceGuid.PcdFSBClock|1000000000
+
 ################################################################################
 #
 # Pcd Dynamic Section - list of all EDK II PCD Entries defined by this Platform
@@ -620,7 +624,6 @@
   gUefiOvmfPkgTokenSpaceGuid.PcdPciMmio64Base|0x0
   gUefiOvmfPkgTokenSpaceGuid.PcdPciMmio64Size|0x800000000
 
-  gEfiMdePkgTokenSpaceGuid.PcdFSBClock|1000000000
   gEfiMdePkgTokenSpaceGuid.PcdPlatformBootTimeOut|0
 
   # set PcdPciExpressBaseAddress to MAX_UINT64, which signifies that this

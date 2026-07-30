@@ -313,8 +313,6 @@ HttpBootDhcp (
     return EFI_NOT_STARTED;
   }
 
-  Status = EFI_DEVICE_ERROR;
-
   if (!Private->UsingIpv6) {
     //
     // Start D.O.R.A process to get a IPv4 address and other boot information.
@@ -434,8 +432,7 @@ HttpBootGetBootFileCaller (
         if (*BufferSize < Private->BootFileSize) {
           *BufferSize = Private->BootFileSize;
           *ImageType  = Private->ImageType;
-          Status      = EFI_BUFFER_TOO_SMALL;
-          return Status;
+          return EFI_BUFFER_TOO_SMALL;
         }
 
         //
@@ -450,10 +447,14 @@ HttpBootGetBootFileCaller (
                      ImageType
                      );
           if (!EFI_ERROR (Status) ||
-              ((Status != EFI_TIMEOUT) && (Status != EFI_DEVICE_ERROR)) ||
-              (Retries >= PcdGet32 (PcdMaxHttpResumeRetries)))
+              ((Status != EFI_TIMEOUT) && (Status != EFI_DEVICE_ERROR)))
           {
-            break;
+            return Status;
+          }
+
+          if (Retries == PcdGet32 (PcdMaxHttpResumeRetries)) {
+            DEBUG ((DEBUG_ERROR, "HttpBootGetBootFileCaller: Error downloading NBP file, even after trying to resume %d times.\n", Retries));
+            return Status;
           }
 
           //
@@ -465,23 +466,22 @@ HttpBootGetBootFileCaller (
           HttpIoDestroyIo (&Private->HttpIo);
           Status = HttpBootCreateHttpIo (Private);
           if (EFI_ERROR (Status)) {
-            break;
+            return Status;
           }
 
           DEBUG ((DEBUG_WARN | DEBUG_INFO, "HttpBootGetBootFileCaller: NBP file download interrupted, will try to resume the operation.\n"));
           gBS->Stall (1000 * 1000 * PcdGet32 (PcdHttpDelayBetweenResumeRetries));
         }
 
-        if (EFI_ERROR (Status) && (Retries >= PcdGet32 (PcdMaxHttpResumeRetries))) {
-          DEBUG ((DEBUG_ERROR, "HttpBootGetBootFileCaller: Error downloading NBP file, even after trying to resume %d times.\n", Retries));
-        }
-
-        return Status;
+        //
+        // Only reach here if the for loop above is not executed, which means PcdMaxHttpResumeRetries is 0.
+        //
+        return EFI_UNSUPPORTED;
 
       case GetBootFileError:
       default:
         AsciiPrint ("\n  Error: Could not retrieve NBP file size from HTTP server.\n");
-        return Status;
+        return EFI_UNSUPPORTED;
     }
   }
 }
@@ -978,9 +978,8 @@ EFI_HTTP_BOOT_CALLBACK_PROTOCOL  gHttpBootDxeHttpBootCallback = {
 /**
   Callback function that is invoked when an HTTP event occurs during HTTP Boot.
 
-  This function handles TLS-related events (HttpEventTlsConnectSession and
-  HttpEventTlsConfigured) and prints error messages to the screen when a TLS
-  error is encountered during the HTTP Boot process.
+  This function handles all HTTP callback events and prints error messages
+  to the screen when an error is encountered during the HTTP Boot process.
 
   @param[in]  This              Pointer to the EDKII_HTTP_CALLBACK_PROTOCOL instance.
   @param[in]  Event             The event that occurs in the current state.
@@ -996,8 +995,20 @@ HttpBootHttpCallback (
 {
   if (EFI_ERROR (EventStatus)) {
     switch (Event) {
+      case HttpEventDns:
+        AsciiPrint ("\n  Error: DNS resolution failed - %r.\n", EventStatus);
+        break;
+
+      case HttpEventConnectTcp:
+        AsciiPrint ("\n  Error: TCP connection failed - %r.\n", EventStatus);
+        break;
+
       case HttpEventTlsConnectSession:
         AsciiPrint ("\n  Error: TLS session connection failed - %r.\n", EventStatus);
+        break;
+
+      case HttpEventInitSession:
+        AsciiPrint ("\n  Error: HTTP session initialization failed - %r.\n", EventStatus);
         break;
 
       case HttpEventTlsConfigured:
@@ -1005,6 +1016,7 @@ HttpBootHttpCallback (
         break;
 
       default:
+        AsciiPrint ("\n  Error: Unknown HTTP event - %r.\n", EventStatus);
         break;
     }
   }

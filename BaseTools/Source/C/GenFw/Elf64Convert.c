@@ -130,6 +130,8 @@ STATIC UINT32 mHiiRsrcOffset;
 STATIC UINT32 mRelocOffset;
 STATIC UINT32 mDebugOffset;
 STATIC UINT32 mExportOffset;
+STATIC UINT32 mBuildIdOffset;
+STATIC BOOLEAN mBuildIdFound;
 //
 // Used for RISC-V relocations.
 //
@@ -227,6 +229,10 @@ InitializeElf64 (
     ElfFunctions->WriteExport = WriteExport64;
   }
 
+  if (mBuildIdFlag) {
+    mCoffNbrSections++;
+  }
+
   return TRUE;
 }
 
@@ -288,6 +294,22 @@ IsHiiRsrcShdr (
   Elf_Shdr *Namedr = GetShdrByIndex(mEhdr->e_shstrndx);
 
   return (BOOLEAN) (strcmp((CHAR8*)mEhdr + Namedr->sh_offset + Shdr->sh_name, ELF_HII_SECTION_NAME) == 0);
+}
+
+STATIC
+BOOLEAN
+IsBuildIdShdr (
+  Elf_Shdr *Shdr
+  )
+{
+  Elf_Shdr *Namedr = GetShdrByIndex(mEhdr->e_shstrndx);
+
+  if (Namedr->sh_offset + Shdr->sh_name >= mFileBufferSize) {
+    Error (NULL, 0, 3000, "Invalid", "IsBuildIdShdr: Name offset %lu is larger then file size %lu", mEhdr->e_shstrndx, mFileBufferSize);
+    exit(EXIT_FAILURE);
+  }
+
+  return (BOOLEAN) (strcmp((CHAR8*)mEhdr + Namedr->sh_offset + Shdr->sh_name, ELF_BUILD_ID_SECTION_NAME) == 0);
 }
 
 STATIC
@@ -1123,6 +1145,40 @@ ScanSections64 (
     }
   }
 
+  //
+  //  The build-ID section.
+  //
+  mBuildIdOffset = mCoffOffset;
+  mBuildIdFound = FALSE;
+  if (mBuildIdFlag) {
+    for (i = 0; i < mEhdr->e_shnum; i++) {
+      Elf_Shdr *shdr = GetShdrByIndex(i);
+      if (IsBuildIdShdr(shdr)) {
+        if ((shdr->sh_addralign != 0) && (shdr->sh_addralign != 1)) {
+          // the alignment field is valid
+          if ((shdr->sh_addr & (shdr->sh_addralign - 1)) == 0) {
+            // if the section address is aligned we must align PE/COFF
+            mCoffOffset = (UINT32) ((mCoffOffset + shdr->sh_addralign - 1) & ~(shdr->sh_addralign - 1));
+          } else {
+            Error (NULL, 0, 3000, "Invalid", "Section address not aligned to its own alignment.");
+          }
+        }
+        if (shdr->sh_size != 0) {
+          mBuildIdOffset = mCoffOffset;
+          mCoffSectionsOffset[i] = mCoffOffset;
+          mCoffOffset += (UINT32) shdr->sh_size;
+          mCoffOffset = CoffAlign(mCoffOffset);
+          mBuildIdFound = TRUE;
+        }
+        break;
+      }
+    }
+
+    if (!mBuildIdFound) {
+      Warning (NULL, 0, 0, NULL, "Build ID section is not found in %s.", mInImageName);
+    }
+  }
+
   mRelocOffset = mCoffOffset;
 
   //
@@ -1242,16 +1298,39 @@ ScanSections64 (
     }
   }
 
-  if ((mRelocOffset - mHiiRsrcOffset) > 0) {
-    CreateSectionHeader (".rsrc", mHiiRsrcOffset, mRelocOffset - mHiiRsrcOffset,
+  //
+  // Determine the end offset for .rsrc section based on whether build-ID is present
+  //
+  if (mBuildIdFound) {
+    Offset = mBuildIdOffset;
+  } else {
+    Offset = mRelocOffset;
+  }
+
+  if ((Offset - mHiiRsrcOffset) > 0) {
+    CreateSectionHeader (".rsrc", mHiiRsrcOffset, Offset - mHiiRsrcOffset,
             EFI_IMAGE_SCN_CNT_INITIALIZED_DATA
             | EFI_IMAGE_SCN_MEM_READ);
 
-    NtHdr->Pe32Plus.OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_RESOURCE].Size = mRelocOffset - mHiiRsrcOffset;
+    NtHdr->Pe32Plus.OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_RESOURCE].Size = Offset - mHiiRsrcOffset;
     NtHdr->Pe32Plus.OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_RESOURCE].VirtualAddress = mHiiRsrcOffset;
   } else {
     // Don't make a section of size 0.
     NtHdr->Pe32Plus.FileHeader.NumberOfSections--;
+  }
+
+  //
+  // Add build-ID section if requested and found
+  //
+  if (mBuildIdFlag) {
+    if (mBuildIdFound) {
+      CreateSectionHeader (".bldid", mBuildIdOffset, mRelocOffset - mBuildIdOffset,
+              EFI_IMAGE_SCN_CNT_INITIALIZED_DATA
+              | EFI_IMAGE_SCN_MEM_READ);
+    } else {
+      // Don't make a section of size 0, decrement the section count
+      NtHdr->Pe32Plus.FileHeader.NumberOfSections--;
+    }
   }
 
 }
@@ -1280,6 +1359,9 @@ WriteSections64 (
       break;
     case SECTION_DATA:
       Filter = IsDataShdr;
+      break;
+    case SECTION_BUILD_ID:
+      Filter = IsBuildIdShdr;
       break;
     default:
       return FALSE;
@@ -1734,18 +1816,29 @@ WriteSections64 (
           WriteSectionRiscV64 (Rel, Targ, SymShdr, Sym);
         } else if (mEhdr->e_machine == EM_LOONGARCH) {
           switch (ELF_R_TYPE(Rel->r_info)) {
-            INT64 Offset;
-            INT32 Lo, Hi;
+            INT64     Offset;
+            INT64     BackIdx;
+            INT32     LoImm, HiImm;
+            UINT8     *PreTarg;
+            Elf_Rela  *PreRel;
+            INT64     SymCoffRva;
+            INT64     InsnCoffRva;
+            INT64     PairHiCoffRva;
 
           case R_LARCH_SOP_PUSH_ABSOLUTE:
+          case R_LARCH_64:
             //
-            // Absolute relocation.
+            // R_LARCH_SOP_PUSH_ABSOLUTE is an absolute relocation, and
+            // R_LARCH_64 stores an absolute runtime address in section
+            // contents.  Translate such values from the linked ELF section
+            // address space to the generated PE/COFF RVA space.
+            // WriteRelocations64() still emits the PE/COFF base relocation
+            // for load-time image rebasing.
             //
             *(UINT64 *)Targ = *(UINT64 *)Targ - SymShdr->sh_addr + mCoffSectionsOffset[Sym->st_shndx];
             break;
 
           case R_LARCH_MARK_LA:
-          case R_LARCH_64:
           case R_LARCH_NONE:
           case R_LARCH_32:
           case R_LARCH_RELATIVE:
@@ -1802,10 +1895,8 @@ WriteSections64 (
           case R_LARCH_ABS_LO12:
           case R_LARCH_ABS64_LO20:
           case R_LARCH_ABS64_HI12:
-          case R_LARCH_PCALA_LO12:
           case R_LARCH_PCALA64_LO20:
           case R_LARCH_PCALA64_HI12:
-          case R_LARCH_GOT_PC_LO12:
           case R_LARCH_GOT64_PC_LO20:
           case R_LARCH_GOT64_PC_HI12:
           case R_LARCH_GOT64_HI20:
@@ -1844,73 +1935,103 @@ WriteSections64 (
             //
             break;
 
+            //
+            // The following four types are used the PC related method to fixup.
+            //
+          case R_LARCH_PCALA_HI20:
           case R_LARCH_GOT_PC_HI20:
-            Offset = Sym->st_value - (UINTN)(Targ - mCoffFile);
-            if (Offset < 0) {
-              Offset = (UINTN)(Targ - mCoffFile) - Sym->st_value;
-              Hi = Offset & ~0xfff;
-              Lo = (INT32)((Offset & 0xfff) << 20) >> 20;
-              if ((Lo < 0) && (Lo > -2048)) {
-                Hi += 0x1000;
-                Lo = ~(0x1000 - Lo) + 1;
-              }
-              Hi = ~Hi + 1;
-              Lo = ~Lo + 1;
+            Offset = 0;
+            SymCoffRva = (INT64)Sym->st_value - (INT64)SymShdr->sh_addr + (INT64)mCoffSectionsOffset[Sym->st_shndx];
+            InsnCoffRva = (INT64)(UINTN)(Targ - mCoffFile);
+            if (ELF_R_TYPE(Rel->r_info) == R_LARCH_PCALA_HI20) {
+              //
+              // Calculate the PE PC-relative offset.  SymCoffRva is the
+              // referenced symbol in the generated PE/COFF RVA space, and
+              // InsnCoffRva is the PE/COFF RVA of this instruction.
+              //
+              Offset = (INT32)((SymCoffRva + Rel->r_addend) - InsnCoffRva);
+            } else if (ELF_R_TYPE(Rel->r_info) == R_LARCH_GOT_PC_HI20) {
+              //
+              // Convert the referenced symbol from the linked ELF section
+              // address space to the generated PE/COFF RVA space before
+              // calculating the PE PC-relative offset.  Targ already points
+              // into the generated PE/COFF image buffer.
+              //
+              Offset = SymCoffRva - InsnCoffRva;
             } else {
-              Hi = Offset & ~0xfff;
-              Lo = (INT32)((Offset & 0xfff) << 20) >> 20;
-              if (Lo < 0) {
-                Hi += 0x1000;
-                Lo = ~(0x1000 - Lo) + 1;
-              }
+              Error (NULL, 0, 3000, "Invalid", "LoongArch PC related: wrong relocation type.");
+              break;
             }
-            // Re-encode the offset as PCADDU12I + ADDI.D(Convert LD.D) instruction
-            *(UINT32 *)Targ &= 0x1f;
-            *(UINT32 *)Targ |= 0x1c000000;
-            *(UINT32 *)Targ |= (((Hi >> 12) & 0xfffff) << 5);
-            *(UINT32 *)(Targ + 4) &= 0x3ff;
-            *(UINT32 *)(Targ + 4) |= 0x2c00000 | ((Lo & 0xfff) << 10);
+
+            //
+            // The original PCALA/GOT_PC relocations are page based, but this
+            // path rewrites the HI/LO pair to PCADDU12I plus ADDI.D.  Split
+            // the generated PE/COFF instruction-relative offset for that pair.
+            //
+            HiImm = (UINT32)((Offset + 0x800) >> 12) & 0xFFFFF;
+
+            //
+            // Convert the first instruction from PCALAU12I to PCADDU12I and re-encode the offset into them.
+            //
+            *(UINT32 *)Targ &= 0x1F;
+            *(UINT32 *)Targ |= 0x1C000000;
+            *(UINT32 *)Targ |= HiImm << 5;
             break;
 
-          //
-          // Attempt to convert instruction.
-          //
-          case R_LARCH_PCALA_HI20:
-            // Decode the PCALAU12I instruction and the instruction that following it.
-            Offset = ((INT32)((*(UINT32 *)Targ & 0x1ffffe0) << 7));
-            Offset += ((INT32)((*(UINT32 *)(Targ + 4) & 0x3ffc00) << 10) >> 20);
+          case R_LARCH_PCALA_LO12:
+          case R_LARCH_GOT_PC_LO12:
+            PreTarg = NULL;
+            PreRel  = NULL;
+
             //
-            // PCALA offset is relative to the previous page boundary,
-            // whereas PCADD offset is relative to the instruction itself.
-            // So fix up the offset so it points to the page containing
-            // the symbol.
+            // Because the HI always at front of LO, so backtracking the corresponding HI.
             //
-            Offset -= (UINTN)(Targ - mCoffFile) & 0xfff;
-            if (Offset < 0) {
-              Offset = -Offset;
-              Hi = Offset & ~0xfff;
-              Lo = (INT32)((Offset & 0xfff) << 20) >> 20;
-              if ((Lo < 0) && (Lo > -2048)) {
-                Hi += 0x1000;
-                Lo = ~(0x1000 - Lo) + 1;
-              }
-              Hi = ~Hi + 1;
-              Lo = ~Lo + 1;
-            } else {
-              Hi = Offset & ~0xfff;
-              Lo = (INT32)((Offset & 0xfff) << 20) >> 20;
-              if (Lo < 0) {
-                Hi += 0x1000;
-                Lo = ~(0x1000 - Lo) + 1;
+            for (BackIdx = (INT32)(RelIdx - RelShdr->sh_entsize); BackIdx >= 0; BackIdx -= (INT32)RelShdr->sh_entsize) {
+              PreRel = (Elf_Rela *)((UINT8 *)mEhdr + RelShdr->sh_offset + BackIdx);
+              if (ELF_R_TYPE(PreRel->r_info) == R_LARCH_PCALA_HI20 || ELF_R_TYPE(PreRel->r_info) == R_LARCH_GOT_PC_HI20) {
+                if (ELF_R_SYM(PreRel->r_info) != ELF_R_SYM(Rel->r_info)) {
+                  continue;
+                }
+                if (PreRel->r_addend == Rel->r_addend) {
+                  PreTarg = mCoffFile + SecOffset + (PreRel->r_offset - SecShdr->sh_addr);
+                  break;
+                }
               }
             }
-            // Convert the first instruction from PCALAU12I to PCADDU12I and re-encode the offset into them.
-            *(UINT32 *)Targ &= 0x1f;
-            *(UINT32 *)Targ |= 0x1c000000;
-            *(UINT32 *)Targ |= (((Hi >> 12) & 0xfffff) << 5);
-            *(UINT32 *)(Targ + 4) &= 0xffc003ff;
-            *(UINT32 *)(Targ + 4) |= (Lo & 0xfff) << 10;
+
+            if (BackIdx < 0) {
+              Error (NULL, 0, 3000, "Invalid", "LoongArch PC related: LO has no corresponding HI.");
+              break;
+            }
+
+            //
+            // Calculate the corresponding HI relative to PC using the PE symbol RVA and fix the LO offset.
+            //
+            if (ELF_R_TYPE(Rel->r_info) == R_LARCH_PCALA_LO12 && ELF_R_TYPE(PreRel->r_info) == R_LARCH_PCALA_HI20) {
+              SymCoffRva = (INT64)Sym->st_value - (INT64)SymShdr->sh_addr + (INT64)mCoffSectionsOffset[Sym->st_shndx];
+              PairHiCoffRva = (INT64)(UINTN)(PreTarg - mCoffFile);
+              Offset = (INT32)((SymCoffRva + PreRel->r_addend) - PairHiCoffRva);
+              LoImm = (UINT32)(Offset & 0xFFF);
+              //
+              // Only fill the LO offset in corresponding instructions.
+              //
+              *(UINT32 *)Targ &= 0xFFC003FF;
+              *(UINT32 *)Targ |= LoImm << 10;
+            } else if (ELF_R_TYPE(Rel->r_info) == R_LARCH_GOT_PC_LO12 && ELF_R_TYPE(PreRel->r_info) == R_LARCH_GOT_PC_HI20) {
+              SymCoffRva = (INT64)Sym->st_value - (INT64)SymShdr->sh_addr + (INT64)mCoffSectionsOffset[Sym->st_shndx];
+              PairHiCoffRva = (INT64)(UINTN)(PreTarg - mCoffFile);
+              Offset = SymCoffRva - PairHiCoffRva;
+              LoImm = (UINT32)(Offset & 0xFFF);
+              //
+              // Convert this instruction as ADDI.D and fill the LO offset into it.
+              //
+              *(UINT32 *)Targ &= 0x3FF;
+              *(UINT32 *)Targ |= (0x2C00000 | LoImm << 10);
+            } else {
+              Error (NULL, 0, 3000, "Invalid", "LoongArch PC related: relocation not matched.");
+            }
             break;
+
           default:
             Error (NULL, 0, 3000, "Invalid", "WriteSections64(): %s unsupported ELF EM_LOONGARCH relocation 0x%x.", mInImageName, (unsigned) ELF64_R_TYPE(Rel->r_info));
           }

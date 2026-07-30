@@ -9,7 +9,7 @@ on the TianoCore wiki.
 
 ## Basic Status
 
-| Package              | Windows VS2022 (IA32/X64)| Ubuntu GCC (IA32/X64/AARCH64) | Known Issues |
+| Package              | Windows VS2026 (IA32/X64)| Ubuntu GCC (IA32/X64/AARCH64) | Known Issues |
 | :----                | :-----                   | :----                             | :---         |
 | ArmPkg               |                    | :heavy_check_mark: |
 | ArmPlatformPkg       |                    | :heavy_check_mark: |
@@ -29,7 +29,6 @@ on the TianoCore wiki.
 | PcAtChipsetPkg       | :heavy_check_mark: | :heavy_check_mark: |
 | SecurityPkg          | :heavy_check_mark: | :heavy_check_mark: | Spell checking in audit mode
 | ShellPkg             | :heavy_check_mark: | :heavy_check_mark: | Spell checking in audit mode, 3 modules are not being built by DSC
-| SignedCapsulePkg     |
 | SourceLevelDebugPkg  |
 | StandaloneMmPkg      | :heavy_check_mark: | :heavy_check_mark: |
 | UefiCpuPkg           | :heavy_check_mark: | :heavy_check_mark: | Spell checking in audit mode, 2 binary modules not being built by DSC
